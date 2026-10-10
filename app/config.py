@@ -7,7 +7,8 @@ class Settings(BaseSettings):
     sandbox_image: str = "woodholz/infomator-sandbox:latest"
     sandbox_name_prefix: str = "yuan-sandbox"
     sandbox_api_port: int = 8081
-    sandbox_ttl_minutes: int = 30
+    # Container SERVICE_TIMEOUT_MINUTES; keep >= absolute_max_lifetime_seconds / 60.
+    sandbox_ttl_minutes: int = 1440
     sandbox_mem_limit: str = "512m"
     sandbox_cpu_quota: int = 50000
     sandbox_network: str | None = None
@@ -19,10 +20,10 @@ class Settings(BaseSettings):
 
     idle_grace_seconds: int = 30
     max_lifetime_seconds: int = 1800
-    # Each heartbeat pushes destroy_after to now + this many seconds.
-    heartbeat_extend_seconds: int = 300
-    # Hard ceiling from created_at; heartbeat cannot go past this.
-    absolute_max_lifetime_seconds: int = 10800
+    # Each heartbeat pushes destroy_after to now + this many seconds (30 min).
+    heartbeat_extend_seconds: int = 1800
+    # Hard ceiling from created_at; heartbeat cannot go past this (24 h).
+    absolute_max_lifetime_seconds: int = 86400
     cdp_ready_timeout_seconds: int = 60
 
     host: str = "0.0.0.0"

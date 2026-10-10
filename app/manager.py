@@ -82,8 +82,14 @@ class SandboxManager:
         return sandbox
 
     def _start_container(self, sandbox: BrowserSandbox) -> None:
+        # Container TTL is minutes; API absolute max is seconds — align so heartbeat
+        # cannot outlive the image's own SERVICE_TIMEOUT_MINUTES.
+        ttl_minutes = max(
+            settings.sandbox_ttl_minutes,
+            (settings.absolute_max_lifetime_seconds + 59) // 60,
+        )
         env = {
-            "SERVICE_TIMEOUT_MINUTES": str(settings.sandbox_ttl_minutes),
+            "SERVICE_TIMEOUT_MINUTES": str(ttl_minutes),
             "CHROME_ARGS": settings.sandbox_chrome_args,
         }
         if settings.sandbox_https_proxy:

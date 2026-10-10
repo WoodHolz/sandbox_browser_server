@@ -36,7 +36,7 @@ POST /api/v1/sandboxes/{browser_id}/run
 curl -X POST "$SANDBOX_BASE/api/v1/sandboxes/$BROWSER_ID/heartbeat"
 ```
 
-每次把 `destroy_after` 推到大约 `now + HEARTBEAT_EXTEND_SECONDS`（默认 300 秒），但不超过 `created_at + ABSOLUTE_MAX_LIFETIME_SECONDS`（默认 10800 秒 = 3 小时）。建议轮询间隔短于延长窗口（例如每 60～120 秒）。用完仍应调 `script-finished` 或 `DELETE`。
+每次把 `destroy_after` 推到大约 `now + HEARTBEAT_EXTEND_SECONDS`（默认 1800 秒 = 30 分钟），但不超过 `created_at + ABSOLUTE_MAX_LIFETIME_SECONDS`（默认 86400 秒 = 24 小时）。建议轮询间隔短于延长窗口（例如每 10～15 分钟）。用完仍应调 `script-finished` 或 `DELETE`。容器内 `SANDBOX_TTL_MINUTES` 需单独设够（例如 1440），心跳改不了容器内部超时。
 
 ## 运行
 
@@ -124,3 +124,11 @@ python3 examples/bilibili.py usage2
 ```
 
 激活 `.venv` 后也可以直接用 `python`（venv 里会有这个命令）。
+
+打开 `https://research.ventify.ai/auto.html`（与 Bilibili 示例独立，默认不注入 Cookie）：
+
+```bash
+export SANDBOX_BASE=https://dev.gameday.tech/sandbox
+python3 examples/ventify_auto.py usage2
+# 开发服务器本机也可：python3 examples/ventify_auto.py usage1
+```
