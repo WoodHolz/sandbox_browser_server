@@ -77,6 +77,8 @@ async def apply_context(
     if (local_map or session_map) and not url:
         raise ValueError("url is required before localStorage or sessionStorage")
 
+    page_url: str | None = None
+    verified: dict[str, Any] | None = None
     async with async_playwright() as playwright:
         browser = await playwright.chromium.connect_over_cdp(sandbox.cdp_url)
         context = await _context(browser)
@@ -87,7 +89,9 @@ async def apply_context(
             await context.add_cookies(payload)
         page = context.pages[0] if context.pages else await context.new_page()
         if url:
-            await page.goto(url)
+            # load can hang on SPAs; domcontentloaded is enough to set storage.
+            await page.goto(url, wait_until="domcontentloaded", timeout=120_000)
+            page_url = page.url
         if local_map or session_map:
             await page.evaluate(
                 """([localMap, sessionMap]) => {
@@ -96,21 +100,34 @@ async def apply_context(
                 }""",
                 [local_map, session_map],
             )
+            verified = await page.evaluate(
+                """([localKeys, sessionKeys]) => {
+                    const localStorageOut = {};
+                    const sessionStorageOut = {};
+                    for (const key of localKeys) localStorageOut[key] = localStorage.getItem(key);
+                    for (const key of sessionKeys) sessionStorageOut[key] = sessionStorage.getItem(key);
+                    return { localStorage: localStorageOut, sessionStorage: sessionStorageOut };
+                }""",
+                [list(local_map.keys()), list(session_map.keys())],
+            )
         await browser.close()
 
     if payload:
         sandbox.cookies.extend(payload)
     logger.info(
-        "context applied %s cookies url=%s local=%s session=%s",
+        "context applied %s cookies url=%s local=%s session=%s page=%s",
         len(payload),
         bool(url),
         len(local_map),
         len(session_map),
+        page_url or "",
     )
     return {
         "cookies": len(payload),
         "local_storage": len(local_map),
         "session_storage": len(session_map),
+        "page_url": page_url,
+        "verified": verified,
     }
 
 

@@ -1,0 +1,24 @@
+{
+  "url": "https://www.bilibili.com",
+  "cookies": [
+    {
+      "name": "SESSDATA",
+      "value": "replace-me",
+      "domain": ".bilibili.com",
+      "path": "/"
+    },
+    {
+      "name": "bili_jct",
+      "value": "replace-me-too",
+      "domain": ".bilibili.com",
+      "path": "/"
+    }
+  ],
+  "localStorage": {
+    "demo_local_key": "demo_local_value",
+    "demo_json": "{\"ok\":true}"
+  },
+  "sessionStorage": {
+    "demo_session_key": "demo_session_value"
+  }
+}

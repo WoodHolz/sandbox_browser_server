@@ -9,7 +9,10 @@
     }
   ],
   "localStorage": {
-    "example_key": "example_value"
+    "example_key": "example_value",
+    "demo_local": "from-bilibili-demo"
   },
-  "sessionStorage": {}
+  "sessionStorage": {
+    "demo_session": "from-bilibili-demo"
+  }
 }

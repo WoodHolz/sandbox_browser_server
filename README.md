@@ -132,3 +132,13 @@ export SANDBOX_BASE=https://dev.gameday.tech/sandbox
 python3 examples/ventify_auto.py usage2
 # 开发服务器本机也可：python3 examples/ventify_auto.py usage1
 ```
+
+完整重建状态（cookies + localStorage + sessionStorage，服务端会回读校验）：
+
+```bash
+export SANDBOX_BASE=https://dev.gameday.tech/sandbox
+python3 examples/context_demo.py usage2
+# 状态文件：examples/context_demo_state.json
+```
+
+`/context` 若返回 503，多半是页面 `goto` 失败（以前默认等 `load` 易超时）；当前实现已改为 `domcontentloaded` + 120s。看服务日志 `logs/run.log` 里的 `context apply failed`。
