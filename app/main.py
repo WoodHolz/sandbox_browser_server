@@ -17,11 +17,24 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Memory is empty on boot; any leftover yuan-sandbox containers are orphans.
+    try:
+        n = manager.cleanup_orphans()
+        if n:
+            logger.info("startup removed %s orphan sandbox container(s)", n)
+    except Exception:
+        logger.exception("startup orphan cleanup failed")
     task = asyncio.create_task(_sweeper())
     yield
     task.cancel()
     for sandbox in manager.list():
         manager.destroy(sandbox.browser_id)
+    try:
+        n = manager.cleanup_orphans()
+        if n:
+            logger.info("shutdown removed %s orphan sandbox container(s)", n)
+    except Exception:
+        logger.exception("shutdown orphan cleanup failed")
 
 
 async def _sweeper() -> None:

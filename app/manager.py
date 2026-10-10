@@ -203,6 +203,67 @@ class SandboxManager:
         sandbox.status = "destroyed"
         sandbox.cdp_url = ""
 
+    def tracked_names(self) -> set[str]:
+        return {
+            s.container_name
+            for s in self._items.values()
+            if s.status != "destroyed"
+        }
+
+    def cleanup_orphans(self) -> int:
+        """Remove only this service's orphan containers (never by image name).
+
+        Match rule (both required):
+        - Docker label app=sandbox-yuan (set at create; infomator does not use this)
+        - Container name starts with "{SANDBOX_NAME_PREFIX}-" (default yuan-sandbox-)
+
+        Infomator sandboxes are typically named sandbox-<id> with compose labels, so
+        they are not touched even though they share woodholz/infomator-sandbox.
+        """
+        tracked = self.tracked_names()
+        prefix = f"{settings.sandbox_name_prefix}-"
+        # Refuse prefixes that collide with infomator / generic docker sandboxes.
+        banned = {"sandbox-", "infomator-sandbox-", "-"}
+        if not settings.sandbox_name_prefix or prefix in banned:
+            logger.error(
+                "refusing orphan cleanup: SANDBOX_NAME_PREFIX=%r is empty or too generic",
+                settings.sandbox_name_prefix,
+            )
+            return 0
+        removed = 0
+        with docker_client() as client:
+            try:
+                candidates = client.containers.list(
+                    all=True,
+                    filters={"label": "app=sandbox-yuan"},
+                )
+            except Exception:
+                logger.exception("list labeled sandboxes failed")
+                return 0
+            for container in candidates:
+                name = container.name or ""
+                labels = container.labels or {}
+                if labels.get("app") != "sandbox-yuan":
+                    continue
+                if not name.startswith(prefix):
+                    logger.warning(
+                        "skip container %s: has app=sandbox-yuan but name not under %s",
+                        name,
+                        prefix,
+                    )
+                    continue
+                if name in tracked:
+                    continue
+                try:
+                    logger.info("orphan remove %s", name)
+                    container.remove(force=True)
+                    removed += 1
+                except docker.errors.NotFound:
+                    pass
+                except Exception:
+                    logger.exception("orphan remove failed %s", name)
+        return removed
+
     def sweep(self) -> None:
         now = time.time()
         for sandbox in list(self._items.values()):
@@ -213,6 +274,13 @@ class SandboxManager:
                     continue
                 logger.info("sweep destroy %s status=%s", sandbox.browser_id, sandbox.status)
                 self.destroy(sandbox.browser_id)
+        # Containers left after process restart never appear in list(); reap them here.
+        try:
+            n = self.cleanup_orphans()
+            if n:
+                logger.info("sweep removed %s orphan sandbox container(s)", n)
+        except Exception:
+            logger.exception("orphan cleanup failed")
 
     def _require(self, browser_id: str) -> BrowserSandbox:
         sandbox = self.get(browser_id)

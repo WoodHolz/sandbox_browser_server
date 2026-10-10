@@ -30,6 +30,13 @@ POST /api/v1/sandboxes/{browser_id}/run
 
 未收到结束事件时，`MAX_LIFETIME_SECONDS` 到期且不在 running 时销毁。也可 `DELETE /api/v1/sandboxes/{browser_id}`。
 
+API 状态只在进程内存里。`run.py` 重启后 `list` 会空，但 Docker 里可能仍有本服务创建的容器。处理方式：
+
+- 孤儿清理**只认** Docker label `app=sandbox-yuan`，并且名称必须以 `SANDBOX_NAME_PREFIX-`（默认 `yuan-sandbox-`）开头
+- **不会**按镜像名删除，因此同机上的 infomator（常见名 `sandbox-<id>`、无此 label）不会被误删
+- 启动 / 停止脚本与进程 lifespan、sweeper 都走上述规则
+- 容器 TTL 仍是兜底；`SANDBOX_NAME_PREFIX` 不要改成过于泛化的 `sandbox`
+
 用法 1 长时间占用时，同事定时调用心跳延长回收：
 
 ```bash
