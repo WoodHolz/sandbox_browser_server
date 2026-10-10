@@ -34,19 +34,53 @@ POST /api/v1/sandboxes/{browser_id}/run
 
 ```bash
 cp .env.example .env   # 默认 SANDBOX_IMAGE=woodholz/infomator-sandbox:latest
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8090
-```
-
-只有 `python3` 时建虚拟环境：
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python3 run.py                 # 等价于 uvicorn app.main:app --host 0.0.0.0 --port 8090
+# python3 run.py --reload      # 开发热重载
 ```
 
-同事若自己连 CDP，只需要本服务和已构建的 `infomator-sandbox` 镜像，不必在调用方安装 Chromium。
+HOST / PORT 可读 `.env`。同事若自己连 CDP，只需要本服务和已构建的沙盒镜像，不必在调用方安装 Chromium。
+
+### systemd
+
+仓库里有 `deploy/sandbox-browser-server.service`（默认路径 `/home/ubuntu/sandbox_browser_server`）。
+
+```bash
+sudo cp deploy/sandbox-browser-server.service /etc/systemd/system/
+# 若部署目录或用户不同，先改 Unit 里的 User / WorkingDirectory / ExecStart
+sudo systemctl daemon-reload
+sudo systemctl enable --now sandbox-browser-server
+sudo systemctl status sandbox-browser-server
+```
+
+日志：`journalctl -u sandbox-browser-server -f`
+
+### nginx 反代（不对外暴露 8090）
+
+仓库里有 `deploy/nginx-sandbox-browser-server.conf`。挂到 `dev.gameday.tech` 的 HTTPS `server` 里后，同事只用：
+
+```text
+https://dev.gameday.tech/sandbox
+```
+
+不必再写 `:8090`。本机 / 同事：
+
+```bash
+export SANDBOX_BASE=https://dev.gameday.tech/sandbox
+curl -s "$SANDBOX_BASE/docs" -o /dev/null -w '%{http_code}\n'
+python3 examples/bilibili.py usage2
+```
+
+反代生效后，服务只听本机（`.env`）：
+
+```bash
+HOST=127.0.0.1
+PORT=8090
+```
+
+并确认防火墙 / 安全组不再放行公网 8090。`usage1` 的 CDP 仍是容器映射端口，反代管的是 HTTP API，不是 CDP。
 
 ## 浏览器状态
 

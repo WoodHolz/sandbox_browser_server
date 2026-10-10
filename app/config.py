@@ -21,5 +21,9 @@ class Settings(BaseSettings):
     max_lifetime_seconds: int = 1800
     cdp_ready_timeout_seconds: int = 60
 
+    host: str = "0.0.0.0"
+    port: int = 8090
+
 
 settings = Settings()
+

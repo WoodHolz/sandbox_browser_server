@@ -1,0 +1,21 @@
+[Unit]
+Description=sandbox-browser-server (CDP Playwright sandbox API)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sandbox_browser_server
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/ubuntu/sandbox_browser_server/.env
+ExecStart=/home/ubuntu/sandbox_browser_server/.venv/bin/python run.py
+Restart=on-failure
+RestartSec=5
+# Docker socket access for creating sandbox containers
+SupplementaryGroups=docker
+
+[Install]
+WantedBy=multi-user.target
