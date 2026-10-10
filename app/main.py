@@ -89,6 +89,7 @@ def _view(sandbox) -> dict:
         "vnc_url": sandbox.vnc_url,
         "created_at": sandbox.created_at,
         "finished_at": sandbox.finished_at,
+        "destroy_after": sandbox.destroy_after,
     }
 
 
@@ -195,6 +196,22 @@ def script_finished(browser_id: str):
         sandbox = manager.script_finished(browser_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="sandbox not found") from None
+    return _view(sandbox)
+
+
+@app.post("/api/v1/sandboxes/{browser_id}/heartbeat")
+def heartbeat(browser_id: str):
+    """Extend recycle deadline (watchdog for usage 1).
+
+    Each call sets destroy_after to about now + HEARTBEAT_EXTEND_SECONDS,
+    capped by created_at + ABSOLUTE_MAX_LIFETIME_SECONDS.
+    """
+    try:
+        sandbox = manager.heartbeat(browser_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="sandbox not found") from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _view(sandbox)
 
 

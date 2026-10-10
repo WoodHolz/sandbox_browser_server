@@ -30,6 +30,14 @@ POST /api/v1/sandboxes/{browser_id}/run
 
 未收到结束事件时，`MAX_LIFETIME_SECONDS` 到期且不在 running 时销毁。也可 `DELETE /api/v1/sandboxes/{browser_id}`。
 
+用法 1 长时间占用时，同事定时调用心跳延长回收：
+
+```bash
+curl -X POST "$SANDBOX_BASE/api/v1/sandboxes/$BROWSER_ID/heartbeat"
+```
+
+每次把 `destroy_after` 推到大约 `now + HEARTBEAT_EXTEND_SECONDS`（默认 300 秒），但不超过 `created_at + ABSOLUTE_MAX_LIFETIME_SECONDS`（默认 10800 秒 = 3 小时）。建议轮询间隔短于延长窗口（例如每 60～120 秒）。用完仍应调 `script-finished` 或 `DELETE`。
+
 ## 运行
 
 ```bash

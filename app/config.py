@@ -19,6 +19,10 @@ class Settings(BaseSettings):
 
     idle_grace_seconds: int = 30
     max_lifetime_seconds: int = 1800
+    # Each heartbeat pushes destroy_after to now + this many seconds.
+    heartbeat_extend_seconds: int = 300
+    # Hard ceiling from created_at; heartbeat cannot go past this.
+    absolute_max_lifetime_seconds: int = 10800
     cdp_ready_timeout_seconds: int = 60
 
     host: str = "0.0.0.0"
