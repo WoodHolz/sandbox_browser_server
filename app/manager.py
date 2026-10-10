@@ -1,0 +1,190 @@
+"""Start and stop the infomator sandbox container.
+
+Container contract matches ai-manus DockerSandbox.start:
+image, ports 8081 / 9222 / 5901, SERVICE_TIMEOUT_MINUTES, CHROME_ARGS.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Literal
+
+import docker
+import httpx
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+Status = Literal["creating", "ready", "running", "finished", "destroyed"]
+
+
+@dataclass
+class BrowserSandbox:
+    browser_id: str
+    container_name: str
+    status: Status = "creating"
+    cdp_url: str = ""
+    vnc_url: str = ""
+    api_url: str = ""
+    created_at: float = field(default_factory=time.time)
+    finished_at: float | None = None
+    destroy_after: float | None = None
+    cookies: list = field(default_factory=list)
+
+
+@contextmanager
+def docker_client():
+    if settings.docker_host:
+        client = docker.from_env(environment={"DOCKER_HOST": settings.docker_host})
+    else:
+        client = docker.from_env()
+    try:
+        yield client
+    finally:
+        try:
+            client.close()
+        except Exception:
+            logger.debug("docker client close failed", exc_info=True)
+
+
+class SandboxManager:
+    def __init__(self) -> None:
+        self._items: dict[str, BrowserSandbox] = {}
+
+    def get(self, browser_id: str) -> BrowserSandbox | None:
+        item = self._items.get(browser_id)
+        if item is None or item.status == "destroyed":
+            return None
+        return item
+
+    def list(self) -> list[BrowserSandbox]:
+        return [s for s in self._items.values() if s.status != "destroyed"]
+
+    async def create(self) -> BrowserSandbox:
+        browser_id = uuid.uuid4().hex[:12]
+        name = f"{settings.sandbox_name_prefix}-{browser_id}"
+        sandbox = BrowserSandbox(browser_id=browser_id, container_name=name)
+        self._items[browser_id] = sandbox
+        try:
+            self._start_container(sandbox)
+            await self._wait_cdp(sandbox)
+            sandbox.status = "ready"
+            sandbox.destroy_after = time.time() + settings.max_lifetime_seconds
+        except Exception:
+            self.destroy(browser_id)
+            raise
+        return sandbox
+
+    def _start_container(self, sandbox: BrowserSandbox) -> None:
+        env = {
+            "SERVICE_TIMEOUT_MINUTES": str(settings.sandbox_ttl_minutes),
+            "CHROME_ARGS": settings.sandbox_chrome_args,
+        }
+        if settings.sandbox_https_proxy:
+            env["HTTPS_PROXY"] = settings.sandbox_https_proxy
+        if settings.sandbox_http_proxy:
+            env["HTTP_PROXY"] = settings.sandbox_http_proxy
+        if settings.sandbox_no_proxy:
+            env["NO_PROXY"] = settings.sandbox_no_proxy
+
+        api_port = f"{settings.sandbox_api_port}/tcp"
+        config = {
+            "image": settings.sandbox_image,
+            "name": sandbox.container_name,
+            "detach": True,
+            "auto_remove": True,
+            "ports": {api_port: None, "5901/tcp": None, "9222/tcp": None},
+            "environment": env,
+            "mem_limit": settings.sandbox_mem_limit,
+            "cpu_quota": settings.sandbox_cpu_quota,
+            "labels": {"app": "sandbox-yuan", "browser_id": sandbox.browser_id},
+        }
+        if settings.sandbox_network:
+            config["network"] = settings.sandbox_network
+
+        with docker_client() as client:
+            container = client.containers.run(**config)
+            container.reload()
+            if settings.sandbox_network:
+                net = container.attrs["NetworkSettings"]["Networks"][settings.sandbox_network]
+                ip = net["IPAddress"]
+                sandbox.api_url = f"http://{ip}:{settings.sandbox_api_port}"
+                sandbox.vnc_url = f"ws://{ip}:5901"
+                sandbox.cdp_url = f"http://{ip}:9222"
+            else:
+                ports = container.attrs["NetworkSettings"]["Ports"]
+                host = "127.0.0.1"
+                sandbox.api_url = f"http://{host}:{ports[api_port][0]['HostPort']}"
+                sandbox.vnc_url = f"ws://{host}:{ports['5901/tcp'][0]['HostPort']}"
+                sandbox.cdp_url = f"http://{host}:{ports['9222/tcp'][0]['HostPort']}"
+        logger.info("sandbox %s cdp %s", sandbox.browser_id, sandbox.cdp_url)
+
+    async def _wait_cdp(self, sandbox: BrowserSandbox) -> None:
+        deadline = time.time() + settings.cdp_ready_timeout_seconds
+        async with httpx.AsyncClient(timeout=2) as client:
+            while time.time() < deadline:
+                try:
+                    resp = await client.get(f"{sandbox.cdp_url}/json/version")
+                    if resp.status_code == 200 and "webSocketDebuggerUrl" in resp.text:
+                        return
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(0.5)
+        raise TimeoutError(f"CDP not ready: {sandbox.cdp_url}")
+
+    def mark_running(self, browser_id: str) -> BrowserSandbox:
+        sandbox = self._require(browser_id)
+        if sandbox.status not in ("ready", "finished"):
+            raise RuntimeError(f"sandbox {browser_id} is {sandbox.status}")
+        sandbox.status = "running"
+        sandbox.finished_at = None
+        return sandbox
+
+    def script_finished(self, browser_id: str) -> BrowserSandbox:
+        """Explicit end event. Container stays up for idle_grace_seconds, then is removed."""
+        sandbox = self._require(browser_id)
+        sandbox.status = "finished"
+        sandbox.finished_at = time.time()
+        sandbox.destroy_after = sandbox.finished_at + settings.idle_grace_seconds
+        return sandbox
+
+    def destroy(self, browser_id: str) -> None:
+        sandbox = self._items.get(browser_id)
+        if sandbox is None:
+            return
+        with docker_client() as client:
+            try:
+                container = client.containers.get(sandbox.container_name)
+                container.remove(force=True)
+            except docker.errors.NotFound:
+                pass
+            except Exception:
+                logger.exception("remove container %s", sandbox.container_name)
+        sandbox.status = "destroyed"
+        sandbox.cdp_url = ""
+
+    def sweep(self) -> None:
+        now = time.time()
+        for sandbox in list(self._items.values()):
+            if sandbox.status == "destroyed":
+                continue
+            if sandbox.destroy_after is not None and now >= sandbox.destroy_after:
+                if sandbox.status == "running":
+                    continue
+                logger.info("sweep destroy %s status=%s", sandbox.browser_id, sandbox.status)
+                self.destroy(sandbox.browser_id)
+
+    def _require(self, browser_id: str) -> BrowserSandbox:
+        sandbox = self.get(browser_id)
+        if sandbox is None:
+            raise KeyError(browser_id)
+        return sandbox
+
+
+manager = SandboxManager()
