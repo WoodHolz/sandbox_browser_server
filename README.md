@@ -57,6 +57,17 @@ sudo systemctl status sandbox-browser-server
 
 日志：`journalctl -u sandbox-browser-server -f`
 
+开发阶段不用 systemd 时，用仓库脚本区分多个 `run.py` 服务：
+
+```bash
+chmod +x deploy/start-background.sh deploy/stop-background.sh
+./deploy/start-background.sh
+./deploy/stop-background.sh   # 只停本仓库，不会 pkill 其它项目的 run.py
+```
+
+不要用全局 `pkill -f "python run.py"`。若手启，请用完整路径区分，例如：
+`pkill -f "/home/ubuntu/sandbox_browser_server/run.py"`
+
 ### nginx 反代（不对外暴露 8090）
 
 仓库里有 `deploy/nginx-sandbox-browser-server.conf`。挂到 `dev.gameday.tech` 的 HTTPS `server` 里后，同事只用：
