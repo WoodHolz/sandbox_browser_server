@@ -35,8 +35,15 @@ POST /api/v1/sandboxes/{browser_id}/run
 ```bash
 cp .env.example .env   # SANDBOX_IMAGE 与 infomator 的 sandbox 镜像一致
 pip install -r requirements.txt
-python -m playwright install chromium   # 仅 /run 代跑脚本时需要本机 Playwright
 uvicorn app.main:app --host 0.0.0.0 --port 8090
+```
+
+只有 `python3` 时建虚拟环境：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 同事若自己连 CDP，只需要本服务和已构建的 `infomator-sandbox` 镜像，不必在调用方安装 Chromium。
@@ -57,8 +64,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8090
 
 ```bash
 # 用法 1：同事本机 Playwright 连接 cdp_url，结束后通知 script-finished
-python examples/bilibili.py usage1
+python3 examples/bilibili.py usage1
 
 # 用法 2：把脚本交给 POST /run，由本服务执行，进程退出即结束
-python examples/bilibili.py usage2
+python3 examples/bilibili.py usage2
 ```
+
+激活 `.venv` 后也可以直接用 `python`（venv 里会有这个命令）。

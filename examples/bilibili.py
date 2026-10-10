@@ -4,10 +4,10 @@ Two ways to drive the browser. Both share create + context restore
 (cookies, then the target page, then localStorage / sessionStorage).
 
     # 用法 1: Playwright runs on this machine, then we notify script-finished.
-    python examples/bilibili.py usage1
+    python3 examples/bilibili.py usage1
 
     # 用法 2: this service runs the Playwright script.
-    python examples/bilibili.py usage2
+    python3 examples/bilibili.py usage2
 
 State file defaults to examples/bilibili_cookies.json.
 Service base URL defaults to http://127.0.0.1:8090 (env SANDBOX_BASE).
@@ -112,7 +112,7 @@ def usage2() -> None:
 
 def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in ("usage1", "usage2"):
-        print("usage: python examples/bilibili.py usage1|usage2", file=sys.stderr)
+        print("usage: python3 examples/bilibili.py usage1|usage2", file=sys.stderr)
         sys.exit(2)
     if sys.argv[1] == "usage1":
         usage1()

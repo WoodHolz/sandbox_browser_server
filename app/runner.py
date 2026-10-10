@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 
 from app.manager import manager
 
@@ -24,7 +25,7 @@ async def run_script(browser_id: str, script: str, timeout_seconds: int = 600) -
     env["CDP_URL"] = sandbox.cdp_url
     env["BROWSER_ID"] = browser_id
     proc = await asyncio.create_subprocess_exec(
-        "python",
+        sys.executable,
         "-c",
         code,
         env=env,
