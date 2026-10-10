@@ -33,7 +33,7 @@ POST /api/v1/sandboxes/{browser_id}/run
 ## 运行
 
 ```bash
-cp .env.example .env   # SANDBOX_IMAGE 与 infomator 的 sandbox 镜像一致
+cp .env.example .env   # 默认 SANDBOX_IMAGE=woodholz/infomator-sandbox:latest
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8090
 ```

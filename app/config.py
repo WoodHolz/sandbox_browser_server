@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    sandbox_image: str = "infomator-sandbox"
+    sandbox_image: str = "woodholz/infomator-sandbox:latest"
     sandbox_name_prefix: str = "yuan-sandbox"
     sandbox_api_port: int = 8081
     sandbox_ttl_minutes: int = 30
