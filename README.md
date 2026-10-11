@@ -89,21 +89,23 @@ chmod +x deploy/start-background.sh deploy/stop-background.sh
 
 ### nginx 反代（不对外暴露后端端口）
 
-仓库里有两份 conf，挂到 `dev.gameday.tech` 的 HTTPS `server` 里：
+仓库里有这些 conf，挂到 `dev.gameday.tech` 的 HTTPS `server` 里：
 
 | conf | 公网路径 | 本机后端 |
 | --- | --- | --- |
 | `deploy/nginx-sandbox-browser-server.conf` | `/sandbox` | `127.0.0.1:8090` |
 | `deploy/nginx-research.conf` | `/research` | `127.0.0.1:8010` |
+| `deploy/nginx-page.conf` | `/page` | `127.0.0.1:5052` |
 
 同事只用：
 
 ```text
 https://dev.gameday.tech/sandbox
 https://dev.gameday.tech/research
+https://dev.gameday.tech/page
 ```
 
-不必再写 `:8090` / `:8010`。本机 / 同事：
+不必再写 `:8090` / `:8010` / `:5052`。本机 / 同事：
 
 ```bash
 export SANDBOX_BASE=https://dev.gameday.tech/sandbox
@@ -115,10 +117,10 @@ python3 examples/bilibili.py usage2
 
 ```bash
 HOST=127.0.0.1
-PORT=8090   # sandbox；research 用 8010
+PORT=8090   # sandbox；research 用 8010；page 用 5052
 ```
 
-并确认防火墙 / 安全组不再放行公网 8090 / 8010。`usage1` 的 CDP 仍是容器映射端口，反代管的是 HTTP API，不是 CDP。
+并确认防火墙 / 安全组不再放行公网 8090 / 8010 / 5052。`usage1` 的 CDP 仍是容器映射端口，反代管的是 HTTP API，不是 CDP。
 
 ## 浏览器状态
 
