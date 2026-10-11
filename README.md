@@ -87,15 +87,23 @@ chmod +x deploy/start-background.sh deploy/stop-background.sh
 不要用全局 `pkill -f "python run.py"`。若手启，请用完整路径区分，例如：
 `pkill -f "/home/ubuntu/sandbox_browser_server/run.py"`
 
-### nginx 反代（不对外暴露 8090）
+### nginx 反代（不对外暴露后端端口）
 
-仓库里有 `deploy/nginx-sandbox-browser-server.conf`。挂到 `dev.gameday.tech` 的 HTTPS `server` 里后，同事只用：
+仓库里有两份 conf，挂到 `dev.gameday.tech` 的 HTTPS `server` 里：
+
+| conf | 公网路径 | 本机后端 |
+| --- | --- | --- |
+| `deploy/nginx-sandbox-browser-server.conf` | `/sandbox` | `127.0.0.1:8090` |
+| `deploy/nginx-research.conf` | `/research` | `127.0.0.1:8010` |
+
+同事只用：
 
 ```text
 https://dev.gameday.tech/sandbox
+https://dev.gameday.tech/research
 ```
 
-不必再写 `:8090`。本机 / 同事：
+不必再写 `:8090` / `:8010`。本机 / 同事：
 
 ```bash
 export SANDBOX_BASE=https://dev.gameday.tech/sandbox
@@ -107,10 +115,10 @@ python3 examples/bilibili.py usage2
 
 ```bash
 HOST=127.0.0.1
-PORT=8090
+PORT=8090   # sandbox；research 用 8010
 ```
 
-并确认防火墙 / 安全组不再放行公网 8090。`usage1` 的 CDP 仍是容器映射端口，反代管的是 HTTP API，不是 CDP。
+并确认防火墙 / 安全组不再放行公网 8090 / 8010。`usage1` 的 CDP 仍是容器映射端口，反代管的是 HTTP API，不是 CDP。
 
 ## 浏览器状态
 
