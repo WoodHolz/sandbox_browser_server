@@ -192,7 +192,11 @@ async def upload_context(browser_id: str, body: ContextRequest):
 
 @app.post("/api/v1/sandboxes/{browser_id}/run", response_model=RunResponse)
 async def run(browser_id: str, body: RunRequest):
-    """Connect Playwright to this sandbox over CDP and run the script."""
+    """Run one script segment over CDP; sandbox stays up afterward (ready).
+
+    Does not auto-destroy. Same lifecycle as usage 1: heartbeat, then
+    script-finished or DELETE when fully done. Call /run again for the next segment.
+    """
     if manager.get(browser_id) is None:
         raise HTTPException(status_code=404, detail="sandbox not found")
     try:
@@ -209,7 +213,7 @@ async def run(browser_id: str, body: RunRequest):
 
 @app.post("/api/v1/sandboxes/{browser_id}/events/script-finished")
 def script_finished(browser_id: str):
-    """Colleague-side Playwright finished. Starts the idle grace timer."""
+    """Explicit end (usage 1 or 2). Starts the idle grace timer before destroy."""
     try:
         sandbox = manager.script_finished(browser_id)
     except KeyError:
@@ -219,7 +223,7 @@ def script_finished(browser_id: str):
 
 @app.post("/api/v1/sandboxes/{browser_id}/heartbeat")
 def heartbeat(browser_id: str):
-    """Reset recycle countdown (watchdog for usage 1).
+    """Reset recycle countdown (usage 1 and usage 2).
 
     Each call restarts the timer to about HEARTBEAT_EXTEND_SECONDS from now
     (default 30 minutes), capped by created_at + ABSOLUTE_MAX_LIFETIME_SECONDS.

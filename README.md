@@ -7,28 +7,30 @@ POST /api/v1/sandboxes
         -> 启动 infomator-sandbox，等到 CDP /json/version
         -> 返回 browser_id + cdp_url
 
-同事 Playwright:
+用法 1 — 同事本机 Playwright:
         browser = await playwright.chromium.connect_over_cdp(cdp_url)
         ...
-POST /api/v1/sandboxes/{browser_id}/events/script-finished
+        POST .../heartbeat          # 长时间占用时重置倒计时
+        POST .../events/script-finished 或 DELETE
         -> 空闲宽限后销毁容器
 
-或者由本服务代跑脚本:
-POST /api/v1/sandboxes/{browser_id}/run
-        {"script": "... python, 变量 cdp_url / browser_id 已注入 ..."}
-        进程退出即视为脚本结束事件
+用法 2 — 本服务代跑脚本（可多次，每次一段）:
+        POST .../run  {"script": "..."}   # 进程退出后沙盒仍在，回到 ready
+        POST .../run  {"script": "..."}   # 下一段
+        POST .../heartbeat                # 与用法 1 相同
+        POST .../events/script-finished 或 DELETE
 ```
 
 ## 生命周期
 
 | 状态 | 含义 |
 | --- | --- |
-| ready | CDP 可用，等待连接或 `/run` |
+| ready | CDP 可用，等待连接或下一次 `/run` |
 | running | `/run` 执行中（此期间 sweeper 不拆容器） |
-| finished | 收到脚本结束事件，`IDLE_GRACE_SECONDS` 后销毁 |
+| finished | 显式 `script-finished`，`IDLE_GRACE_SECONDS` 后销毁 |
 | destroyed | 容器已删 |
 
-未收到结束事件时，`MAX_LIFETIME_SECONDS` 到期且不在 running 时销毁。也可 `DELETE /api/v1/sandboxes/{browser_id}`。
+`/run` 结束**不会**自动销毁。未心跳且未显式结束时，`MAX_LIFETIME_SECONDS` 到期且不在 running 时销毁。也可 `DELETE /api/v1/sandboxes/{browser_id}`。
 
 API 状态只在进程内存里。`run.py` 重启后 `list` 会空，但 Docker 里可能仍有本服务创建的容器。处理方式：
 
@@ -37,13 +39,13 @@ API 状态只在进程内存里。`run.py` 重启后 `list` 会空，但 Docker 
 - 启动 / 停止脚本与进程 lifespan、sweeper 都走上述规则
 - 容器 TTL 仍是兜底；`SANDBOX_NAME_PREFIX` 不要改成过于泛化的 `sandbox`
 
-用法 1 长时间占用时，同事定时调用心跳延长回收：
+用法 1 / 用法 2 长时间占用时，同事定时调用心跳重置回收倒计时：
 
 ```bash
 curl -X POST "$SANDBOX_BASE/api/v1/sandboxes/$BROWSER_ID/heartbeat"
 ```
 
-心跳是**倒计时重置**：每次调用把回收倒计时重新设为约 `HEARTBEAT_EXTEND_SECONDS`（默认 1800 秒 = 30 分钟），响应里看 `remain_seconds`。不超过 `created_at + ABSOLUTE_MAX_LIFETIME_SECONDS`（默认 24 小时）。建议轮询间隔短于倒计时窗口（例如每 10～15 分钟）。用完仍应调 `script-finished` 或 `DELETE`。容器内 `SANDBOX_TTL_MINUTES` 需单独设够（例如 1440），心跳改不了容器内部超时。
+心跳是**倒计时重置**：每次调用把回收倒计时重新设为约 `HEARTBEAT_EXTEND_SECONDS`（默认 1800 秒 = 30 分钟），响应里看 `remain_seconds`。不超过 `created_at + ABSOLUTE_MAX_LIFETIME_SECONDS`（默认 24 小时）。建议轮询间隔短于倒计时窗口（例如每 10～15 分钟）。全部用完仍应调 `script-finished` 或 `DELETE`。容器内 `SANDBOX_TTL_MINUTES` 需单独设够（例如 1440），心跳改不了容器内部超时。
 
 创建后若长时间不心跳，仍按 `MAX_LIFETIME_SECONDS`（默认 30 分钟）到期回收。
 
@@ -128,7 +130,7 @@ PORT=8090
 # 用法 1：同事本机 Playwright 连接 cdp_url，结束后通知 script-finished
 python3 examples/bilibili.py usage1
 
-# 用法 2：把脚本交给 POST /run，由本服务执行，进程退出即结束
+# 用法 2：把脚本交给 POST /run（可多次），示例末尾显式 DELETE
 python3 examples/bilibili.py usage2
 ```
 

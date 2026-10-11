@@ -1,7 +1,8 @@
 """Run a colleague Playwright script against a sandbox CDP endpoint.
 
 `cdp_url` and `browser_id` are injected as names in the script.
-Process exit is treated as the explicit script-finished event.
+Process exit returns the sandbox to ready; it is NOT torn down. Lifecycle
+matches usage 1: heartbeat to keep alive, script-finished or DELETE to close.
 """
 
 from __future__ import annotations
@@ -33,15 +34,18 @@ async def run_script(browser_id: str, script: str, timeout_seconds: int = 600) -
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        manager.script_finished(browser_id)
-        return {"exit_code": -1, "stdout": "", "stderr": "script timeout"}
-    manager.script_finished(browser_id)
-    return {
-        "exit_code": proc.returncode,
-        "stdout": stdout.decode(errors="replace")[-8000:],
-        "stderr": stderr.decode(errors="replace")[-8000:],
-    }
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {"exit_code": -1, "stdout": "", "stderr": "script timeout"}
+        return {
+            "exit_code": proc.returncode,
+            "stdout": stdout.decode(errors="replace")[-8000:],
+            "stderr": stderr.decode(errors="replace")[-8000:],
+        }
+    finally:
+        # Keep sandbox for the next /run segment; do not auto script-finished.
+        if manager.get(browser_id) is not None:
+            manager.mark_ready(browser_id)

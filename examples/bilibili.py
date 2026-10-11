@@ -108,6 +108,8 @@ def usage2() -> None:
         {"script": REMOTE_SCRIPT},
     )
     show("run finished", result)
+    # /run no longer auto-destroys; demo closes explicitly (or use script-finished).
+    show("delete", request("DELETE", f"/api/v1/sandboxes/{browser_id}"))
 
 
 def main() -> None:

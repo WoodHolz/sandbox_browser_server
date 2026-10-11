@@ -152,6 +152,13 @@ class SandboxManager:
         sandbox.finished_at = None
         return sandbox
 
+    def mark_ready(self, browser_id: str) -> BrowserSandbox:
+        """Return to ready after /run exits. Does not start idle-grace teardown."""
+        sandbox = self._require(browser_id)
+        sandbox.status = "ready"
+        sandbox.finished_at = None
+        return sandbox
+
     def script_finished(self, browser_id: str) -> BrowserSandbox:
         """Explicit end event. Container stays up for idle_grace_seconds, then is removed."""
         sandbox = self._require(browser_id)
@@ -163,8 +170,9 @@ class SandboxManager:
     def heartbeat(self, browser_id: str) -> BrowserSandbox:
         """Reset recycle countdown: destroy_after = now + HEARTBEAT_EXTEND_SECONDS.
 
-        Capped by created_at + ABSOLUTE_MAX_LIFETIME_SECONDS. Each call restarts
-        the idle timer (countdown form), so remain_seconds jumps back to ~extend.
+        Same for usage 1 (CDP) and usage 2 (/run segments). Capped by
+        created_at + ABSOLUTE_MAX_LIFETIME_SECONDS. Each call restarts the idle
+        timer (countdown form), so remain_seconds jumps back to ~extend.
         """
         sandbox = self._require(browser_id)
         if sandbox.status == "destroyed":
