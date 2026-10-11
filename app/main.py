@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from typing import Any
@@ -95,6 +96,9 @@ class RunResponse(BaseModel):
 
 
 def _view(sandbox) -> dict:
+    remain = None
+    if sandbox.destroy_after is not None:
+        remain = max(0, int(sandbox.destroy_after - time.time()))
     return {
         "browser_id": sandbox.browser_id,
         "status": sandbox.status,
@@ -103,6 +107,7 @@ def _view(sandbox) -> dict:
         "created_at": sandbox.created_at,
         "finished_at": sandbox.finished_at,
         "destroy_after": sandbox.destroy_after,
+        "remain_seconds": remain,
     }
 
 
@@ -214,10 +219,11 @@ def script_finished(browser_id: str):
 
 @app.post("/api/v1/sandboxes/{browser_id}/heartbeat")
 def heartbeat(browser_id: str):
-    """Extend recycle deadline (watchdog for usage 1).
+    """Reset recycle countdown (watchdog for usage 1).
 
-    Each call sets destroy_after to about now + HEARTBEAT_EXTEND_SECONDS,
-    capped by created_at + ABSOLUTE_MAX_LIFETIME_SECONDS.
+    Each call restarts the timer to about HEARTBEAT_EXTEND_SECONDS from now
+    (default 30 minutes), capped by created_at + ABSOLUTE_MAX_LIFETIME_SECONDS.
+    Response includes remain_seconds.
     """
     try:
         sandbox = manager.heartbeat(browser_id)

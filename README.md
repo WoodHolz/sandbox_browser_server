@@ -43,7 +43,9 @@ API 状态只在进程内存里。`run.py` 重启后 `list` 会空，但 Docker 
 curl -X POST "$SANDBOX_BASE/api/v1/sandboxes/$BROWSER_ID/heartbeat"
 ```
 
-每次把 `destroy_after` 推到大约 `now + HEARTBEAT_EXTEND_SECONDS`（默认 1800 秒 = 30 分钟），但不超过 `created_at + ABSOLUTE_MAX_LIFETIME_SECONDS`（默认 86400 秒 = 24 小时）。建议轮询间隔短于延长窗口（例如每 10～15 分钟）。用完仍应调 `script-finished` 或 `DELETE`。容器内 `SANDBOX_TTL_MINUTES` 需单独设够（例如 1440），心跳改不了容器内部超时。
+心跳是**倒计时重置**：每次调用把回收倒计时重新设为约 `HEARTBEAT_EXTEND_SECONDS`（默认 1800 秒 = 30 分钟），响应里看 `remain_seconds`。不超过 `created_at + ABSOLUTE_MAX_LIFETIME_SECONDS`（默认 24 小时）。建议轮询间隔短于倒计时窗口（例如每 10～15 分钟）。用完仍应调 `script-finished` 或 `DELETE`。容器内 `SANDBOX_TTL_MINUTES` 需单独设够（例如 1440），心跳改不了容器内部超时。
+
+创建后若长时间不心跳，仍按 `MAX_LIFETIME_SECONDS`（默认 30 分钟）到期回收。
 
 ## 运行
 

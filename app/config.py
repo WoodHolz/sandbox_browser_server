@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     idle_grace_seconds: int = 30
     max_lifetime_seconds: int = 1800
-    # Each heartbeat pushes destroy_after to now + this many seconds (30 min).
+    # Each heartbeat resets the recycle countdown to this many seconds (30 min).
     heartbeat_extend_seconds: int = 1800
     # Hard ceiling from created_at; heartbeat cannot go past this (24 h).
     absolute_max_lifetime_seconds: int = 86400

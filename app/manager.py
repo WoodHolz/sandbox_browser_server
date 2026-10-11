@@ -161,30 +161,31 @@ class SandboxManager:
         return sandbox
 
     def heartbeat(self, browser_id: str) -> BrowserSandbox:
-        """Extend recycle deadline. Usage 1 watchdog: poll this while still using the browser."""
+        """Reset recycle countdown: destroy_after = now + HEARTBEAT_EXTEND_SECONDS.
+
+        Capped by created_at + ABSOLUTE_MAX_LIFETIME_SECONDS. Each call restarts
+        the idle timer (countdown form), so remain_seconds jumps back to ~extend.
+        """
         sandbox = self._require(browser_id)
         if sandbox.status == "destroyed":
             raise KeyError(browser_id)
         now = time.time()
         ceiling = sandbox.created_at + settings.absolute_max_lifetime_seconds
-        proposed = now + settings.heartbeat_extend_seconds
-        # Never shorten an existing deadline; never exceed the absolute ceiling.
-        next_deadline = min(max(sandbox.destroy_after or 0, proposed), ceiling)
-        if next_deadline <= now:
+        if now >= ceiling:
             raise RuntimeError(
                 f"sandbox {browser_id} has reached absolute max lifetime "
                 f"({settings.absolute_max_lifetime_seconds}s)"
             )
-        sandbox.destroy_after = next_deadline
-        # If colleague already marked finished but still heartbeats, keep them in working state.
+        # Countdown reset (may shorten a longer leftover from create MAX_LIFETIME).
+        sandbox.destroy_after = min(now + settings.heartbeat_extend_seconds, ceiling)
         if sandbox.status == "finished":
             sandbox.status = "ready"
             sandbox.finished_at = None
         logger.info(
-            "heartbeat %s destroy_after=%.0f (in %.0fs)",
+            "heartbeat %s countdown reset remain=%.0fs destroy_after=%.0f",
             browser_id,
-            sandbox.destroy_after,
             sandbox.destroy_after - now,
+            sandbox.destroy_after,
         )
         return sandbox
 
