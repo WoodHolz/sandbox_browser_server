@@ -52,7 +52,7 @@ curl -X POST "$SANDBOX_BASE/api/v1/sandboxes/$BROWSER_ID/heartbeat"
 ## 运行
 
 ```bash
-cp .env.example .env   # 默认 SANDBOX_IMAGE=woodholz/infomator-sandbox:latest
+cp .env.example .env   # 默认 SANDBOX_IMAGE=infomator/infomator-sandbox:latest
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

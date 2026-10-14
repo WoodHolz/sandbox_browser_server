@@ -227,7 +227,7 @@ class SandboxManager:
         - Container name starts with "{SANDBOX_NAME_PREFIX}-" (default yuan-sandbox-)
 
         Infomator sandboxes are typically named sandbox-<id> with compose labels, so
-        they are not touched even though they share woodholz/infomator-sandbox.
+        they are not touched even though they share infomator/infomator-sandbox.
         """
         tracked = self.tracked_names()
         prefix = f"{settings.sandbox_name_prefix}-"
