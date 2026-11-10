@@ -10,6 +10,7 @@ import asyncio
 import logging
 import time
 import uuid
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal
@@ -36,6 +37,54 @@ class BrowserSandbox:
     finished_at: float | None = None
     destroy_after: float | None = None
     cookies: list = field(default_factory=list)
+
+
+def _container_created(container) -> float | None:
+    raw = (container.attrs or {}).get("Created")
+    if not raw:
+        return None
+    try:
+        text = raw.replace("Z", "+00:00")
+        if "." in text:
+            head, tail = text.split(".", 1)
+            frac = "".join(ch for ch in tail if ch.isdigit())[:6]
+            rest = tail[len("".join(ch for ch in tail if ch.isdigit())):]
+            text = f"{head}.{frac}{rest}"
+        return datetime.fromisoformat(text).astimezone(timezone.utc).timestamp()
+    except Exception:
+        logger.debug("unparsed container Created %r", raw, exc_info=True)
+        return None
+
+
+def _bind_urls(sandbox: BrowserSandbox, container) -> None:
+    api_port = f"{settings.sandbox_api_port}/tcp"
+    if settings.sandbox_network:
+        nets = container.attrs["NetworkSettings"]["Networks"]
+        net = nets.get(settings.sandbox_network) or {}
+        ip = net.get("IPAddress") or ""
+        if not ip:
+            return
+        sandbox.api_url = f"http://{ip}:{settings.sandbox_api_port}"
+        sandbox.vnc_url = f"ws://{ip}:5901"
+        sandbox.cdp_url = f"http://{ip}:9222"
+        return
+    ports = container.attrs["NetworkSettings"]["Ports"] or {}
+    host = "127.0.0.1"
+
+    def host_port(key: str) -> str | None:
+        binding = ports.get(key) or []
+        if not binding:
+            return None
+        return binding[0].get("HostPort")
+
+    api = host_port(api_port)
+    vnc = host_port("5901/tcp")
+    cdp = host_port("9222/tcp")
+    if not (api and vnc and cdp):
+        return
+    sandbox.api_url = f"http://{host}:{api}"
+    sandbox.vnc_url = f"ws://{host}:{vnc}"
+    sandbox.cdp_url = f"http://{host}:{cdp}"
 
 
 @contextmanager
@@ -110,6 +159,14 @@ class SandboxManager:
             "mem_limit": settings.sandbox_mem_limit,
             "cpu_quota": settings.sandbox_cpu_quota,
             "labels": {"app": "sandbox-yuan", "browser_id": sandbox.browser_id},
+            # Isolate this container's logs from the daemon json-file policy.
+            "log_config": {
+                "type": settings.sandbox_log_driver,
+                "config": {
+                    "max-size": settings.sandbox_log_max_size,
+                    "max-file": settings.sandbox_log_max_file,
+                },
+            },
         }
         if settings.sandbox_network:
             config["network"] = settings.sandbox_network
@@ -124,11 +181,7 @@ class SandboxManager:
                 sandbox.vnc_url = f"ws://{ip}:5901"
                 sandbox.cdp_url = f"http://{ip}:9222"
             else:
-                ports = container.attrs["NetworkSettings"]["Ports"]
-                host = "127.0.0.1"
-                sandbox.api_url = f"http://{host}:{ports[api_port][0]['HostPort']}"
-                sandbox.vnc_url = f"ws://{host}:{ports['5901/tcp'][0]['HostPort']}"
-                sandbox.cdp_url = f"http://{host}:{ports['9222/tcp'][0]['HostPort']}"
+                _bind_urls(sandbox, container)
         logger.info("sandbox %s cdp %s", sandbox.browser_id, sandbox.cdp_url)
 
     async def _wait_cdp(self, sandbox: BrowserSandbox) -> None:
@@ -218,6 +271,58 @@ class SandboxManager:
             for s in self._items.values()
             if s.status != "destroyed"
         }
+
+    def adopt_running(self) -> int:
+        """Reattach yuan-sandbox containers still inside the create window.
+
+        A process restart used to treat every container as an orphan and delete
+        it, so the next heartbeat 404'd even though the browser was under 30 min.
+        """
+        prefix = f"{settings.sandbox_name_prefix}-"
+        adopted = 0
+        now = time.time()
+        with docker_client() as client:
+            try:
+                candidates = client.containers.list(
+                    all=True,
+                    filters={"label": "app=sandbox-yuan"},
+                )
+            except Exception:
+                logger.exception("list sandboxes for adopt failed")
+                return 0
+            for container in candidates:
+                name = container.name or ""
+                labels = container.labels or {}
+                if labels.get("app") != "sandbox-yuan" or not name.startswith(prefix):
+                    continue
+                browser_id = (labels.get("browser_id") or "").strip()
+                if not browser_id or browser_id in self._items:
+                    continue
+                if container.status != "running":
+                    continue
+                created_at = _container_created(container) or now
+                destroy_after = created_at + settings.max_lifetime_seconds
+                if now >= destroy_after:
+                    continue
+                sandbox = BrowserSandbox(
+                    browser_id=browser_id,
+                    container_name=name,
+                    status="ready",
+                    created_at=created_at,
+                    destroy_after=destroy_after,
+                )
+                _bind_urls(sandbox, container)
+                if not sandbox.cdp_url:
+                    logger.warning("skip adopt %s: no published ports", name)
+                    continue
+                self._items[browser_id] = sandbox
+                adopted += 1
+                logger.info(
+                    "adopted %s remain=%.0fs",
+                    browser_id,
+                    destroy_after - now,
+                )
+        return adopted
 
     def cleanup_orphans(self) -> int:
         """Remove only this service's orphan containers (never by image name).

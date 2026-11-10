@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     sandbox_http_proxy: str | None = None
     sandbox_no_proxy: str | None = None
     docker_host: str | None = None
+    # Per-container logs. Do not inherit the daemon/json-file rotation infomator
+    # uses: that driver rotates Chrome stdout out from under supervisord
+    # (container exits before the 30 min window) and can splice another
+    # container's log bytes into this one.
+    sandbox_log_driver: str = "local"
+    sandbox_log_max_size: str = "20m"
+    sandbox_log_max_file: str = "3"
 
     idle_grace_seconds: int = 30
     max_lifetime_seconds: int = 1800

@@ -18,8 +18,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Memory is empty on boot; any leftover yuan-sandbox containers are orphans.
+    # Memory is empty on boot. Reattach containers still inside the 30 min
+    # window before orphan cleanup, so a restart does not 404 their heartbeat.
     try:
+        kept = manager.adopt_running()
+        if kept:
+            logger.info("startup adopted %s running sandbox container(s)", kept)
         n = manager.cleanup_orphans()
         if n:
             logger.info("startup removed %s orphan sandbox container(s)", n)
