@@ -9,6 +9,9 @@
     # Keepalive: heartbeat past the first 30 min window; sandbox must stay up
     SANDBOX_BASE=https://dev.gameday.tech/sandbox python3 examples/lifecycle_test.py keepalive
 
+    # Playwright probe: step prints + optional docker logs (run on the sandbox host)
+    SANDBOX_BASE=https://dev.gameday.tech/sandbox python3 examples/lifecycle_test.py playwright
+
 Env (optional):
     SANDBOX_BASE       default http://127.0.0.1:8090
     WINDOW_SECONDS     expire wait, default 1830 (~30m + a little slack)
@@ -16,12 +19,17 @@ Env (optional):
     HEARTBEAT_EVERY    keepalive poll interval, default 600
     POLL_EVERY         expire poll interval, default 30
     EXPECT_REMAIN_MIN  after heartbeat, remain_seconds must be >= this (default 1700)
+    TARGET_URL         playwright probe URL (default https://research.ventify.ai)
+    KEEP_SANDBOX=1     do not DELETE after playwright probe (inspect docker logs)
+    DOCKER_LOG_TAIL    lines of docker logs to print when docker is local (default 80)
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -34,6 +42,9 @@ KEEP_SECONDS = int(os.environ.get("KEEP_SECONDS", "1900"))
 HEARTBEAT_EVERY = int(os.environ.get("HEARTBEAT_EVERY", "600"))
 POLL_EVERY = int(os.environ.get("POLL_EVERY", "30"))
 EXPECT_REMAIN_MIN = int(os.environ.get("EXPECT_REMAIN_MIN", "1700"))
+TARGET_URL = os.environ.get("TARGET_URL", "https://research.ventify.ai")
+KEEP_SANDBOX = os.environ.get("KEEP_SANDBOX", "").strip() in ("1", "true", "yes")
+DOCKER_LOG_TAIL = int(os.environ.get("DOCKER_LOG_TAIL", "80"))
 
 
 class Fail(RuntimeError):
@@ -155,6 +166,140 @@ def destroy(browser_id: str) -> None:
     show("heartbeat after delete", {"http_status": code, **payload})
 
 
+def print_docker_sandbox_logs(browser_id: str) -> None:
+    """Print host docker logs for yuan-sandbox-{id}. Only works on the sandbox host."""
+    name = f"yuan-sandbox-{browser_id}"
+    docker = shutil.which("docker")
+    if not docker:
+        print(
+            f"\n== docker logs skipped ==\n"
+            f"no docker CLI here; on the sandbox host run:\n"
+            f"  docker logs --tail {DOCKER_LOG_TAIL} {name}\n"
+            f"  docker inspect --format "
+            f"'status={{{{.State.Status}}}} oom={{{{.State.OOMKilled}}}} "
+            f"exit={{{{.State.ExitCode}}}} log={{{{.HostConfig.LogConfig.Type}}}}' {name}"
+        )
+        return
+    print(f"\n== docker inspect {name} ==")
+    inspect = subprocess.run(
+        [
+            docker,
+            "inspect",
+            "--format",
+            "status={{.State.Status}} oom={{.State.OOMKilled}} "
+            "exit={{.State.ExitCode}} finished={{.State.FinishedAt}} "
+            "log={{.HostConfig.LogConfig.Type}} "
+            "mem={{.HostConfig.Memory}}",
+            name,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    print((inspect.stdout or inspect.stderr or "").strip() or f"exit={inspect.returncode}")
+    print(f"\n== docker logs --tail {DOCKER_LOG_TAIL} {name} ==")
+    logs = subprocess.run(
+        [docker, "logs", "--tail", str(DOCKER_LOG_TAIL), name],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    out = (logs.stdout or "") + (logs.stderr or "")
+    print(out[-12000:] if out else f"(empty; docker exit={logs.returncode})")
+
+
+def playwright_probe() -> None:
+    """Prove /run actually executes Playwright against the sandbox CDP Chrome."""
+    created = create()
+    browser_id = created["browser_id"]
+    marker = f"PW_PROBE_{int(time.time())}"
+    script = f"""
+import asyncio
+import traceback
+from playwright.async_api import async_playwright
+
+MARKER = {marker!r}
+TARGET = {TARGET_URL!r}
+
+def step(msg):
+    print(f"{{MARKER}} STEP {{msg}}", flush=True)
+
+async def main():
+    step("script_enter")
+    step("cdp_url=" + repr(cdp_url))
+    step("browser_id=" + repr(browser_id))
+    try:
+        async with async_playwright() as playwright:
+            step("playwright_started")
+            browser = await playwright.chromium.connect_over_cdp(cdp_url)
+            step("connected_over_cdp")
+            step("contexts=" + str(len(browser.contexts)))
+            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = context.pages[0] if context.pages else await context.new_page()
+            step("page_url_before=" + page.url)
+            step("goto " + TARGET)
+            await page.goto(TARGET, wait_until="domcontentloaded", timeout=120_000)
+            step("page_url_after=" + page.url)
+            title = await page.title()
+            step("title=" + repr(title))
+            body = await page.locator("body").inner_text()
+            step("body_chars=" + str(len(body)))
+            step("has_command_input=" + str(await page.locator("input#command").count()))
+            await browser.close()
+            step("browser_closed")
+        step("script_ok")
+    except Exception as exc:
+        step("script_fail " + type(exc).__name__ + ": " + str(exc))
+        traceback.print_exc()
+        raise
+
+asyncio.run(main())
+"""
+    try:
+        show("status before /run", request("GET", f"/api/v1/sandboxes/{browser_id}"))
+        print_docker_sandbox_logs(browser_id)
+        result = request(
+            "POST",
+            f"/api/v1/sandboxes/{browser_id}/run",
+            {"script": script, "timeout_seconds": 180},
+        )
+        show("run", result)
+        stdout = result.get("stdout") or ""
+        stderr = result.get("stderr") or ""
+        print("\n== /run stdout (raw) ==")
+        print(stdout)
+        if stderr:
+            print("\n== /run stderr (raw) ==")
+            print(stderr)
+        need = [
+            f"{marker} STEP script_enter",
+            f"{marker} STEP playwright_started",
+            f"{marker} STEP connected_over_cdp",
+            f"{marker} STEP goto ",
+            f"{marker} STEP script_ok",
+        ]
+        missing = [line for line in need if line not in stdout]
+        if result.get("exit_code") != 0:
+            raise Fail(f"playwright /run exit_code={result.get('exit_code')}")
+        if missing:
+            raise Fail(
+                "playwright steps missing from stdout (script may not have run): "
+                + ", ".join(missing)
+            )
+        show("status after /run", request("GET", f"/api/v1/sandboxes/{browser_id}"))
+        print_docker_sandbox_logs(browser_id)
+        print("\nOK playwright")
+    finally:
+        if KEEP_SANDBOX:
+            print(
+                f"\nKEEP_SANDBOX=1: left {browser_id} up. On host:\n"
+                f"  docker logs -f yuan-sandbox-{browser_id}\n"
+                f"  curl -sS -X DELETE {BASE}/api/v1/sandboxes/{browser_id}"
+            )
+        else:
+            destroy(browser_id)
+
+
 def smoke() -> None:
     created = create()
     browser_id = created["browser_id"]
@@ -244,10 +389,12 @@ def keepalive() -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 2 or sys.argv[1] not in ("smoke", "expire", "keepalive"):
+    modes = ("smoke", "expire", "keepalive", "playwright")
+    if len(sys.argv) != 2 or sys.argv[1] not in modes:
         print(
-            "usage: python3 examples/lifecycle_test.py smoke|expire|keepalive\n"
-            f"SANDBOX_BASE={BASE}",
+            "usage: python3 examples/lifecycle_test.py "
+            + "|".join(modes)
+            + f"\nSANDBOX_BASE={BASE}",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -257,8 +404,10 @@ def main() -> None:
         smoke()
     elif mode == "expire":
         expire()
-    else:
+    elif mode == "keepalive":
         keepalive()
+    else:
+        playwright_probe()
 
 
 if __name__ == "__main__":

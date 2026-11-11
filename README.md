@@ -49,6 +49,27 @@ curl -X POST "$SANDBOX_BASE/api/v1/sandboxes/$BROWSER_ID/heartbeat"
 
 创建后若长时间不心跳，仍按 `MAX_LIFETIME_SECONDS`（默认 30 分钟）到期回收。
 
+## 和 infomator 共用镜像时
+
+两边都可以用 `infomator/infomator-sandbox`，但 **logging、生命周期、清理范围按本项目写死**，不跟宿主机 daemon / infomator compose 的默认走。
+
+| 层 | 本项目怎么隔离 |
+| --- | --- |
+| 日志驱动 | 创建容器时必带 `log_config`（默认 `local`，20m×3）。`SANDBOX_LOG_DRIVER` 为空会直接拒绝启动，避免再继承 json-file 小文件轮转 |
+| 镜像版本 | 仓库默认仍是 `:latest` 方便对齐；**部署用的 `.env` 在镜像有行为变更后改成 tag 或 digest**，不要让 `:latest` 在你没跑测试时自己变 |
+| 清理范围 | 只删 label `app=sandbox-yuan` 且名称以 `yuan-sandbox-` 开头的容器，不按镜像名扫 |
+
+镜像若改了超时、stdout 日志形态、启动入口或 Chrome 参数，先在本服务上跑：
+
+```bash
+SANDBOX_BASE=https://dev.gameday.tech/sandbox python3 examples/lifecycle_test.py smoke
+# 镜像变更后再跑（各约半小时以上）
+SANDBOX_BASE=https://dev.gameday.tech/sandbox python3 examples/lifecycle_test.py expire
+SANDBOX_BASE=https://dev.gameday.tech/sandbox python3 examples/lifecycle_test.py keepalive
+```
+
+`smoke` 覆盖创建、心跳重置到约 30 分钟、`/run` 跑的是本次脚本、删除后心跳 404。`expire` 不心跳，应在窗口附近消失而不是几十秒内消失。`keepalive` 心跳跨过第一个 30 分钟窗口后沙盒仍在。
+
 ## 运行
 
 ```bash

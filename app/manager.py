@@ -87,6 +87,22 @@ def _bind_urls(sandbox: BrowserSandbox, container) -> None:
     sandbox.cdp_url = f"http://{host}:{cdp}"
 
 
+def _log_config() -> dict:
+    """Always set a driver. Empty means Docker inherits the daemon/compose default."""
+    driver = (settings.sandbox_log_driver or "").strip()
+    if not driver:
+        raise RuntimeError(
+            "SANDBOX_LOG_DRIVER is empty; refusing to inherit the host json-file policy"
+        )
+    return {
+        "type": driver,
+        "config": {
+            "max-size": settings.sandbox_log_max_size,
+            "max-file": settings.sandbox_log_max_file,
+        },
+    }
+
+
 @contextmanager
 def docker_client():
     if settings.docker_host:
@@ -160,13 +176,7 @@ class SandboxManager:
             "cpu_quota": settings.sandbox_cpu_quota,
             "labels": {"app": "sandbox-yuan", "browser_id": sandbox.browser_id},
             # Isolate this container's logs from the daemon json-file policy.
-            "log_config": {
-                "type": settings.sandbox_log_driver,
-                "config": {
-                    "max-size": settings.sandbox_log_max_size,
-                    "max-file": settings.sandbox_log_max_file,
-                },
-            },
+            "log_config": _log_config(),
         }
         if settings.sandbox_network:
             config["network"] = settings.sandbox_network
@@ -182,7 +192,13 @@ class SandboxManager:
                 sandbox.cdp_url = f"http://{ip}:9222"
             else:
                 _bind_urls(sandbox, container)
-        logger.info("sandbox %s cdp %s", sandbox.browser_id, sandbox.cdp_url)
+        logger.info(
+            "sandbox %s image=%s log=%s cdp %s",
+            sandbox.browser_id,
+            settings.sandbox_image,
+            settings.sandbox_log_driver,
+            sandbox.cdp_url,
+        )
 
     async def _wait_cdp(self, sandbox: BrowserSandbox) -> None:
         deadline = time.time() + settings.cdp_ready_timeout_seconds
